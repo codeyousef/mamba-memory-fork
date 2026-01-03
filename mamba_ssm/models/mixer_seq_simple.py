@@ -275,9 +275,31 @@ class MambaLMHeadModel(nn.Module, GenerationMixin):
         )
         self.tie_weights()
 
+        # CRITICAL: Default freeze to prevent accidental full fine-tuning
+        self._freeze_backbone()
+
     def tie_weights(self):
         if self.config.tie_embeddings:
             self.lm_head.weight = self.backbone.embedding.weight
+
+    def _freeze_backbone(self):
+        """
+        Safety default: Freeze backbone and LM head to prevent accidental catastrophic forgetting.
+        Only memory_head remains trainable by default.
+        """
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        for param in self.lm_head.parameters():
+            param.requires_grad = False
+
+    def unfreeze_backbone(self):
+        """
+        Call this explicitly ONLY if you know what you're doing (e.g. full fine-tuning).
+        """
+        for param in self.backbone.parameters():
+            param.requires_grad = True
+        for param in self.lm_head.parameters():
+            param.requires_grad = True
 
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None, **kwargs):
         return self.backbone.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
