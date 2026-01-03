@@ -1,3 +1,31 @@
+# Mamba (Catbelly Studio Fork)
+
+> ⚠️ **Note:** This is a fork of the official [state-spaces/mamba](https://github.com/state-spaces/mamba) repository. It contains architectural modifications to support memory augmentation.
+
+## 🐈 Catbelly Studio Modifications
+
+This fork introduces a **Memory Head** to the Mamba architecture, enabling the model to project hidden states into a query vector for external memory retrieval.
+
+### Key Changes
+
+1.  **`DummyMemoryStub` Module**:
+    *   Located in `mamba_ssm/modules/memory_head.py`.
+    *   A lightweight projection layer (`Linear(d_model -> 128)`) that converts the last token's hidden state into a query vector.
+
+2.  **`MambaLMHeadModel` Integration**:
+    *   Modified `mamba_ssm/models/mixer_seq_simple.py`.
+    *   The `forward` pass now returns a `MambaMemoryOutput` dataclass containing `logits`, `query_vector`, and optional `hidden_states`.
+    *   `from_pretrained` now accepts `strict=False` to allow loading standard Mamba checkpoints while initializing the new memory head from scratch.
+
+3.  **Safety Verification**:
+    *   Added `verify_freeze.py` to ensure the backbone can be effectively frozen during memory head training, preventing catastrophic forgetting of the base model's reasoning capabilities.
+
+### Purpose
+
+These changes are designed to support **Month 3** of the Adam project, where we will integrate long-term memory retrieval without destabilizing the pre-trained 7B backbone.
+
+---
+
 # Mamba
 
 ![Mamba](assets/selection.png "Selective State Space")
