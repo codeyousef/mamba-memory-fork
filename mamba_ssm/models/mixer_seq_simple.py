@@ -5,6 +5,8 @@ from functools import partial
 import json
 import os
 import copy
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 from collections import namedtuple
 
@@ -19,11 +21,19 @@ from mamba_ssm.modules.mlp import GatedMLP
 from mamba_ssm.modules.block import Block
 from mamba_ssm.utils.generation import GenerationMixin
 from mamba_ssm.utils.hf import load_config_hf, load_state_dict_hf
+from mamba_ssm.modules.memory_head import DummyMemoryStub
 
 try:
     from mamba_ssm.ops.triton.layer_norm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
+
+
+@dataclass
+class MambaMemoryOutput:
+    logits: torch.FloatTensor
+    query_vector: torch.FloatTensor
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
 
 
 def create_block(
@@ -253,6 +263,7 @@ class MambaLMHeadModel(nn.Module, GenerationMixin):
             **factory_kwargs,
         )
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False, **factory_kwargs)
+        self.memory_head = DummyMemoryStub(d_model, **factory_kwargs)
 
         # Initialize weights and apply final processing
         self.apply(
@@ -280,15 +291,22 @@ class MambaLMHeadModel(nn.Module, GenerationMixin):
         if num_last_tokens > 0:
             hidden_states = hidden_states[:, -num_last_tokens:]
         lm_logits = self.lm_head(hidden_states)
-        CausalLMOutput = namedtuple("CausalLMOutput", ["logits"])
-        return CausalLMOutput(logits=lm_logits)
+        
+        # Project the last token's hidden state to a query vector
+        query_vector = self.memory_head(hidden_states)
+
+        return MambaMemoryOutput(
+            logits=lm_logits,
+            query_vector=query_vector,
+            hidden_states=hidden_states if mixer_kwargs.get("output_hidden_states") else None
+        )
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name, device=None, dtype=None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name, device=None, dtype=None, strict=True, **kwargs):
         config_data = load_config_hf(pretrained_model_name)
         config = MambaConfig(**config_data)
         model = cls(config, device=device, dtype=dtype, **kwargs)
-        model.load_state_dict(load_state_dict_hf(pretrained_model_name, device=device, dtype=dtype))
+        model.load_state_dict(load_state_dict_hf(pretrained_model_name, device=device, dtype=dtype), strict=strict)
         return model
 
     def save_pretrained(self, save_directory):
